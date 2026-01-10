@@ -146,6 +146,42 @@
 </head>
 <body class="bg-gray-50 min-h-screen">
 
+    <!-- NAS登录模态框 -->
+    <div id="nas-login-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg shadow-xl p-6 w-96">
+            <h2 class="text-xl font-bold mb-4 text-gray-800">
+                <i class="fa fa-server mr-2"></i>NAS访问验证
+            </h2>
+            <p class="text-sm text-gray-600 mb-4">请输入NAS访问凭证以加载数据</p>
+            
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700 mb-1">用户名</label>
+                <input type="text" id="nas-username" value="it" 
+                    class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700 mb-1">密码</label>
+                <input type="password" id="nas-password" 
+                    class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="输入NAS密码">
+            </div>
+            
+            <div class="flex justify-between">
+                <button onclick="loadFromLocalOnly()" 
+                    class="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400">
+                    仅使用本地数据
+                </button>
+                <button onclick="loginAndLoadData()" 
+                    class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
+                    <i class="fa fa-sign-in mr-1"></i>登录并加载
+                </button>
+            </div>
+            
+            <p id="login-error" class="text-red-500 text-sm mt-3 hidden"></p>
+        </div>
+    </div>
+
     
     <!-- 主应用容器 -->
     <div id="app-container">
@@ -778,12 +814,267 @@
                 { id: 'trade-transaction', name: '贸易往来', icon: 'fa-exchange', color: '#ec4899' },
                 { id: 'loan', name: '借款', icon: 'fa-handshake-o', color: '#f59e0b' },
                 { id: 'fixed-assets', name: '固定资产设备', icon: 'fa-building', color: '#ec4899' },
-                { id: 'trade-product', name: '贸易产品', icon: 'fa-shopping-cart', color: '#10b981' }
+                { id: 'trade-product', name: '贸易产品', icon: 'fa-shopping-cart', color: '#10b981' },
+                { id: 'administrative-entertainment', name: '其它行政招待费用', icon: 'fa-cutlery', color: '#ef4444' }
             ]
         };
 
         // 初始化应用
-        function initializeApp() {
+        // 显示NAS登录模态框
+        function showLoginModal() {
+            const modal = document.getElementById('nas-login-modal');
+            if (modal) {
+                modal.classList.remove('hidden');
+                document.getElementById('nas-password').focus();
+            }
+        }
+        
+        // 隐藏登录模态框
+        function hideLoginModal() {
+            const modal = document.getElementById('nas-login-modal');
+            if (modal) {
+                modal.classList.add('hidden');
+            }
+        }
+        
+        // 仅使用本地数据
+        function loadFromLocalOnly() {
+            hideLoginModal();
+            showNotification('数据加载', '已使用本地数据进行操作', 'info');
+        }
+        
+        // 登录并从NAS加载数据
+        async function loginAndLoadData() {
+            const username = document.getElementById('nas-username').value.trim();
+            const password = document.getElementById('nas-password').value;
+            const errorEl = document.getElementById('login-error');
+            
+            if (!username || !password) {
+                errorEl.textContent = '请输入用户名和密码';
+                errorEl.classList.remove('hidden');
+                return;
+            }
+            
+            errorEl.classList.add('hidden');
+            
+            try {
+                // 直接加载固定的备份文件，简化逻辑
+                const success = await loadDataFromNAS(username, password);
+                if (success) {
+                    hideLoginModal();
+                    showNotification('数据加载', '已成功从NAS加载数据', 'success');
+                } else {
+                    errorEl.textContent = '数据加载失败，请检查文件格式';
+                    errorEl.classList.remove('hidden');
+                }
+            } catch (error) {
+                console.error('登录失败:', error);
+                if (error.message.includes('Network error') || error.message.includes('timeout')) {
+                    errorEl.textContent = '网络连接失败，请检查网络设置';
+                } else if (error.message.includes('401') || error.message.includes('Unauthorized')) {
+                    errorEl.textContent = '用户名或密码错误';
+                } else {
+                    errorEl.textContent = `登录失败: ${error.message}`;
+                }
+                errorEl.classList.remove('hidden');
+            }
+        }
+        
+        // 获取最新的备份文件
+        async function getLatestBackupFile(username, password) {
+            console.log('尝试获取最新的备份文件');
+            
+            try {
+                const listUrl = 'http://localhost:8000/proxy?action=list';
+                const data = await new Promise((resolve, reject) => {
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('GET', listUrl, true);
+                    
+                    // 使用自定义请求头传递认证信息
+                    xhr.setRequestHeader('X-NAS-Username', username);
+                    xhr.setRequestHeader('X-NAS-Password', password);
+                    xhr.setRequestHeader('Accept', 'application/json');
+                    
+                    xhr.withCredentials = false;
+                    xhr.responseType = 'text';
+                    
+                    xhr.onload = function() {
+                        console.log(`获取文件列表响应状态: ${xhr.status} ${xhr.statusText}`);
+                        if (xhr.status >= 200 && xhr.status < 300) {
+                            console.log('获取文件列表成功');
+                            resolve(xhr.responseText);
+                        } else {
+                            console.error('获取文件列表失败:', xhr.status, xhr.statusText, xhr.responseText);
+                            reject(new Error(`HTTP error! status: ${xhr.status}, message: ${xhr.statusText}`));
+                        }
+                    };
+                    
+                    xhr.onerror = function() {
+                        console.error('获取文件列表网络错误');
+                        reject(new Error('Network error'));
+                    };
+                    
+                    xhr.timeout = 15000;
+                    xhr.ontimeout = function() {
+                        console.error('获取文件列表超时');
+                        reject(new Error('Request timeout'));
+                    };
+                    
+                    xhr.send();
+                });
+                
+                const files = JSON.parse(data);
+                console.log('获取到的文件列表:', files);
+                
+                if (files.length === 0) {
+                    throw new Error('没有找到JSON备份文件');
+                }
+                
+                // 返回最新的文件
+                return files[0];
+            } catch (error) {
+                console.error('获取最新备份文件失败:', error);
+                throw error;
+            }
+        }
+        
+        // 从WebDAV加载数据的函数
+        async function loadDataFromNAS(username, password, backupFile = null) {
+            // 直接使用固定的备份文件URL
+            const fixedUrl = 'http://192.168.31.2:5005/DataBackup/收支表备份_2026-01-05.json';
+            const nasUrl = 'http://localhost:8000/proxy?url=' + encodeURIComponent(fixedUrl);
+            
+            console.log(`尝试访问NAS URL: ${nasUrl}`);
+            console.log(`使用固定备份文件: 收支表备份_2026-01-05.json`);
+            
+            try {
+                const data = await new Promise((resolve, reject) => {
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('GET', nasUrl, true);
+                    
+                    // 使用自定义请求头传递认证信息（更安全）
+                    xhr.setRequestHeader('X-NAS-Username', username);
+                    xhr.setRequestHeader('X-NAS-Password', password);
+                    xhr.setRequestHeader('Accept', '*/*');
+                    
+                    xhr.withCredentials = false;
+                    xhr.responseType = 'text';
+                    
+                    xhr.onload = function() {
+                        console.log(`XMLHttpRequest响应状态: ${xhr.status} ${xhr.statusText}`);
+                        if (xhr.status >= 200 && xhr.status < 300) {
+                            console.log('XMLHttpRequest响应文本:', xhr.responseText);
+                            resolve(xhr.responseText);
+                        } else {
+                            console.error('XMLHttpRequest响应错误:', xhr.status, xhr.statusText, xhr.responseText);
+                            reject(new Error(`HTTP error! status: ${xhr.status}, message: ${xhr.statusText}`));
+                        }
+                    };
+                    
+                    xhr.onerror = function() {
+                        console.error('XMLHttpRequest网络错误');
+                        reject(new Error('Network error'));
+                    };
+                    
+                    xhr.timeout = 15000; // 15秒超时
+                    xhr.ontimeout = function() {
+                        console.error('XMLHttpRequest超时');
+                        reject(new Error('Request timeout'));
+                    };
+                    
+                    xhr.send();
+                });
+                
+                // 尝试解析文本为JSON
+                try {
+                    const jsonData = JSON.parse(data);
+                    console.log('成功将响应文本解析为JSON数据');
+                    return processNASData(jsonData);
+                } catch (jsonError) {
+                    console.error('响应不是有效的JSON:', jsonError);
+                    throw new Error('无法解析JSON数据');
+                }
+            } catch (error) {
+                console.error(`访问${nasUrl}时出错:`, error);
+                // 处理网络错误或其他异常
+                // 尝试直接从localStorage加载数据作为后备
+                console.log('尝试从localStorage加载数据作为后备');
+                return false;
+            }
+        }
+        
+        // 处理从NAS加载的数据
+        function processNASData(data) {
+            console.log('进入processNASData函数，接收到的数据:', data);
+            
+            if (!data) {
+                console.error('processNASData: 没有接收到数据');
+                return false;
+            }
+
+            const currentCompany = getCurrentCompany();
+            console.log('当前公司:', currentCompany);
+
+            // 适配新的嵌套数据结构：data.data.transactions.companyName
+            if (data.data && data.data.transactions) {
+                const transactionsData = data.data.transactions;
+                const companies = Object.keys(transactionsData);
+                
+                console.log('NAS中包含的公司:', companies);
+                
+                // 遍历所有公司，分别保存数据
+                companies.forEach(companyKey => {
+                    const companyTransactions = transactionsData[companyKey];
+                    console.log(`保存公司 ${companyKey} 的交易数据，数量:`, companyTransactions.length);
+                    localStorage.setItem(`transactions_${companyKey}`, JSON.stringify(companyTransactions));
+                });
+                
+                // 更新当前公司的更新时间
+                const today = new Date().toISOString().split('T')[0];
+                localStorage.setItem(`lastUpdated_${currentCompany}`, today);
+                
+                console.log('所有公司的数据已保存完毕');
+            }
+            // 兼容旧的数据结构：data.transactions 是数组
+            else if (Array.isArray(data.transactions)) {
+                console.log('使用旧版数据结构：data.transactions');
+                localStorage.setItem(`transactions_${currentCompany}`, JSON.stringify(data.transactions));
+                const today = new Date().toISOString().split('T')[0];
+                localStorage.setItem(`lastUpdated_${currentCompany}`, today);
+            }
+            // 数据直接是交易数组
+            else if (Array.isArray(data)) {
+                console.log('数据直接是交易数组');
+                localStorage.setItem(`transactions_${currentCompany}`, JSON.stringify(data));
+                const today = new Date().toISOString().split('T')[0];
+                localStorage.setItem(`lastUpdated_${currentCompany}`, today);
+            } else {
+                console.error('数据结构不匹配预期，无法处理');
+                showNotification('数据加载', 'NAS数据结构与预期不符', 'warning');
+                return false;
+            }
+
+            // 验证并重新加载
+            const savedData = localStorage.getItem(`transactions_${currentCompany}`);
+            console.log('数据保存验证:', {
+                hasSavedTransactions: savedData !== null,
+                savedTransactionsLength: savedData ? JSON.parse(savedData).length : 0
+            });
+
+            loadTransactions();
+            updateFinancialSummary();
+            showNotification('数据加载', '已成功从NAS加载数据', 'success');
+            return true;
+        }
+        
+        // 处理从NAS加载的数据失败的情况
+        function handleNASLoadError(error) {
+            console.error('从NAS加载数据失败:', error);
+            showNotification('数据加载', '从NAS加载数据失败，使用本地数据', 'warning');
+            return false;
+        }
+
+        async function initializeApp() {
             // 确保本地存储中的公司信息已初始化
             if (!localStorage.getItem('currentCompany')) {
                 localStorage.setItem('currentCompany', 'company1');
@@ -791,13 +1082,16 @@
             
             // 初始化默认公司
             const currentCompany = getCurrentCompany();
-            
-            // 确保本地存储已初始化
+            // 先确保本地存储已初始化
             initializeLocalStorage(currentCompany);
             
-            // 等待DOM完全加载后再设置公司按钮样式
+            // 先加载本地数据显示基础界面
+            loadTransactions();
+            loadTodos();
+            updateFinancialSummary();
+            
+            // 设置当前公司按钮样式
             setTimeout(() => {
-                // 设置当前公司按钮样式
                 const companyBtns = document.querySelectorAll('.company-btn');
                 if (companyBtns.length > 0) {
                     companyBtns.forEach(btn => {
@@ -810,7 +1104,6 @@
                         currentCompanyBtn.classList.remove('bg-gray-200', 'text-gray-700');
                         currentCompanyBtn.classList.add('bg-primary', 'text-white');
                         
-                        // 更新页面标题
                         const companyName = currentCompanyBtn.textContent.trim();
                         const pageTitle = document.querySelector('h1.text-xl.font-bold');
                         if (pageTitle) {
@@ -826,16 +1119,7 @@
             // 初始化图表
             initializeCharts();
             
-            // 加载交易数据
-            loadTransactions();
-            
-            // 加载待办事项
-            loadTodos();
-            
-            // 更新财务概览
-            updateFinancialSummary();
-            
-            // 设置当前日期为默认交易日期
+            // 初始化其他组件
             const today = new Date();
             const year = today.getFullYear();
             const month = String(today.getMonth() + 1).padStart(2, '0');
@@ -845,20 +1129,16 @@
                 dateInput.value = `${year}-${month}-${day}`;
             }
             
-            // 初始化单位自动完成功能
             initUnitAutocomplete();
-            
-            // 初始化搜索框自动宽度调整
             initSearchAutoWidth();
-            
-            // 初始化财务对账单位下拉框
             initReconciliationUnits();
-            
-            // 初始化分布图表年份和月份下拉框
             initDistributionYearSelect();
-            
-            // 初始化支出和收入分类下拉框
             initCategoryFilters();
+            
+            // 显示登录模态框（延迟显示确保DOM就绪）
+            setTimeout(() => {
+                showLoginModal();
+            }, 100);
         }
         
         // 检查URL参数并自动填充表单
@@ -940,7 +1220,7 @@
         }
 
         // 初始化应用
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', async function() {
             // 公司切换按钮事件监听
             if (document.getElementById('company1-btn') && document.getElementById('company2-btn')) {
                 document.getElementById('company1-btn').addEventListener('click', function() {
@@ -953,7 +1233,7 @@
             }
             
             // 初始化应用
-            initializeApp();
+            await initializeApp();
             
             // 检查URL参数并处理
             checkUrlParams();
@@ -2439,6 +2719,12 @@
 
         // 更新分布图表
         function updateDistributionChart(period) {
+            // 如果图表还没初始化，跳过更新
+            if (!window.distributionChart) {
+                console.log('分布图表未初始化，跳过更新');
+                return;
+            }
+            
             const company = getCurrentCompany();
             const transactions = JSON.parse(localStorage.getItem(`transactions_${company}`)) || [];
             const today = new Date();
@@ -2710,14 +2996,20 @@
             
             // 添加事件监听器
             yearSelect.addEventListener('change', () => {
-                updateCategoryChart(getCurrentCategoryType(), getCurrentCategoryPeriod());
+                const currentType = document.querySelector('.category-type-btn.bg-danger, .category-type-btn.bg-secondary').dataset.type;
+                const currentPeriod = document.querySelector('.category-period-btn.bg-primary').dataset.period;
+                updateCategoryChart(currentType, currentPeriod);
             });
             
             // 月份下拉框事件监听
             const monthSelect = document.getElementById('month-select');
-            monthSelect.addEventListener('change', () => {
-                updateCategoryChart(getCurrentCategoryType(), getCurrentCategoryPeriod());
-            });
+            if (monthSelect) {
+                monthSelect.addEventListener('change', () => {
+                    const currentType = document.querySelector('.category-type-btn.bg-danger, .category-type-btn.bg-secondary').dataset.type;
+                    const currentPeriod = document.querySelector('.category-period-btn.bg-primary').dataset.period;
+                    updateCategoryChart(currentType, currentPeriod);
+                });
+            }
         }
         
         // 初始化分布图表年份下拉框
@@ -2842,6 +3134,12 @@
         
         // 更新分类图表
         function updateCategoryChart(type, period = 'month') {
+            // 如果图表还没初始化，跳过更新
+            if (!window.categoryChart) {
+                console.log('分类图表未初始化，跳过更新');
+                return;
+            }
+            
             const company = getCurrentCompany();
             const transactions = JSON.parse(localStorage.getItem(`transactions_${company}`)) || [];
             const today = new Date();
