@@ -892,65 +892,95 @@
         async function getLatestBackupFile(username, password) {
             console.log('尝试获取最新的备份文件');
             
+            // 配置选项：根据环境选择不同的访问方式
+            const isGitHubPages = window.location.hostname.includes('github.io');
+            
             try {
-                const listUrl = 'http://localhost:8000/proxy?action=list';
-                const data = await new Promise((resolve, reject) => {
-                    const xhr = new XMLHttpRequest();
-                    xhr.open('GET', listUrl, true);
-                    
-                    // 使用自定义请求头传递认证信息
-                    xhr.setRequestHeader('X-NAS-Username', username);
-                    xhr.setRequestHeader('X-NAS-Password', password);
-                    xhr.setRequestHeader('Accept', 'application/json');
-                    
-                    xhr.withCredentials = false;
-                    xhr.responseType = 'text';
-                    
-                    xhr.onload = function() {
-                        console.log(`获取文件列表响应状态: ${xhr.status} ${xhr.statusText}`);
-                        if (xhr.status >= 200 && xhr.status < 300) {
-                            console.log('获取文件列表成功');
-                            resolve(xhr.responseText);
-                        } else {
-                            console.error('获取文件列表失败:', xhr.status, xhr.statusText, xhr.responseText);
-                            reject(new Error(`HTTP error! status: ${xhr.status}, message: ${xhr.statusText}`));
-                        }
+                let listUrl;
+                if (isGitHubPages) {
+                    // GitHub Pages环境：无法获取文件列表，直接返回固定文件
+                    // 注意：在GitHub Pages上，我们无法动态获取文件列表
+                    return {
+                        name: '收支表备份_2026-01-05.json',
+                        path: '/DataBackup/收支表备份_2026-01-05.json',
+                        url: 'http://192.168.31.2:5005/DataBackup/收支表备份_2026-01-05.json'
                     };
+                } else {
+                    // 本地开发环境：使用本地代理获取文件列表
+                    listUrl = 'http://localhost:8000/proxy?action=list';
+                    const data = await new Promise((resolve, reject) => {
+                        const xhr = new XMLHttpRequest();
+                        xhr.open('GET', listUrl, true);
+                        
+                        // 使用自定义请求头传递认证信息
+                        xhr.setRequestHeader('X-NAS-Username', username);
+                        xhr.setRequestHeader('X-NAS-Password', password);
+                        xhr.setRequestHeader('Accept', 'application/json');
+                        
+                        xhr.withCredentials = false;
+                        xhr.responseType = 'text';
+                        
+                        xhr.onload = function() {
+                            console.log(`获取文件列表响应状态: ${xhr.status} ${xhr.statusText}`);
+                            if (xhr.status >= 200 && xhr.status < 300) {
+                                console.log('获取文件列表成功');
+                                resolve(xhr.responseText);
+                            } else {
+                                console.error('获取文件列表失败:', xhr.status, xhr.statusText, xhr.responseText);
+                                reject(new Error(`HTTP error! status: ${xhr.status}, message: ${xhr.statusText}`));
+                            }
+                        };
+                        
+                        xhr.onerror = function() {
+                            console.error('获取文件列表网络错误');
+                            reject(new Error('Network error'));
+                        };
+                        
+                        xhr.timeout = 15000;
+                        xhr.ontimeout = function() {
+                            console.error('获取文件列表超时');
+                            reject(new Error('Request timeout'));
+                        };
+                        
+                        xhr.send();
+                    });
                     
-                    xhr.onerror = function() {
-                        console.error('获取文件列表网络错误');
-                        reject(new Error('Network error'));
-                    };
+                    const files = JSON.parse(data);
+                    console.log('获取到的文件列表:', files);
                     
-                    xhr.timeout = 15000;
-                    xhr.ontimeout = function() {
-                        console.error('获取文件列表超时');
-                        reject(new Error('Request timeout'));
-                    };
+                    if (files.length === 0) {
+                        throw new Error('没有找到JSON备份文件');
+                    }
                     
-                    xhr.send();
-                });
-                
-                const files = JSON.parse(data);
-                console.log('获取到的文件列表:', files);
-                
-                if (files.length === 0) {
-                    throw new Error('没有找到JSON备份文件');
+                    // 返回最新的文件
+                    return files[0];
                 }
-                
-                // 返回最新的文件
-                return files[0];
             } catch (error) {
                 console.error('获取最新备份文件失败:', error);
-                throw error;
+                // 在GitHub Pages上，我们可以返回一个默认的固定文件
+                return {
+                    name: '收支表备份_2026-01-05.json',
+                    path: '/DataBackup/收支表备份_2026-01-05.json',
+                    url: 'http://192.168.31.2:5005/DataBackup/收支表备份_2026-01-05.json'
+                };
             }
         }
         
         // 从WebDAV加载数据的函数
         async function loadDataFromNAS(username, password, backupFile = null) {
-            // 直接使用固定的备份文件URL
+            // 配置选项：根据环境选择不同的访问方式
+            const isGitHubPages = window.location.hostname.includes('github.io');
             const fixedUrl = 'http://192.168.31.2:5005/DataBackup/收支表备份_2026-01-05.json';
-            const nasUrl = 'http://localhost:8000/proxy?url=' + encodeURIComponent(fixedUrl);
+            
+            let nasUrl;
+            if (isGitHubPages) {
+                // GitHub Pages环境：直接访问NAS服务器（需要NAS服务器配置CORS）
+                // 注意：这可能会遇到跨域问题，需要NAS服务器支持
+                nasUrl = fixedUrl;
+            } else {
+                // 本地开发环境：使用本地代理
+                nasUrl = 'http://localhost:8000/proxy?url=' + encodeURIComponent(fixedUrl);
+            }
             
             console.log(`尝试访问NAS URL: ${nasUrl}`);
             console.log(`使用固定备份文件: 收支表备份_2026-01-05.json`);
@@ -980,6 +1010,9 @@
                                 reject(new Error('用户名或密码错误'));
                             } else if (xhr.status === 404) {
                                 reject(new Error('文件不存在'));
+                            } else if (xhr.status === 0) {
+                                // 可能是跨域错误
+                                reject(new Error('跨域访问被拒绝，请检查NAS服务器CORS配置'));
                             } else {
                                 reject(new Error(`HTTP error! status: ${xhr.status}, message: ${xhr.statusText}`));
                             }
