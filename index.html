@@ -786,8 +786,8 @@
         // 初始化应用
         function initializeApp() {
             // 确保本地存储中的公司信息已初始化
-            if (!localStorage.getItem('currentCompany')) {
-                localStorage.setItem('currentCompany', 'company1');
+            if (!localStorage.getItem('currentCompany_statement')) {
+                localStorage.setItem('currentCompany_statement', 'company1');
             }
             
             // 初始化默认公司
@@ -2148,7 +2148,7 @@
                                 
                                 // 恢复当前公司设置
                                 if (data.currentCompany) {
-                                    localStorage.setItem('currentCompany', data.currentCompany);
+                                    localStorage.setItem('currentCompany_statement', data.currentCompany);
                                 }
                                 
                                 // 重新加载数据
